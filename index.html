@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bug Detection Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#050B12;
+    --bg-2:#081820;
+    --glow-2: rgba(232,121,249,0.10);
+    --panel: rgba(34,211,238,0.06);
+    --panel-border: rgba(45,212,191,0.18);
+    --panel-border-hover: rgba(45,212,191,0.4);
+    --accent:#22D3EE;
+    --accent-2:#2DD4BF;
+    --text:#EDEBFA;
+    --muted:#9490B0;
+    --critical:#F43F5E;
+    --warning:#F59E0B;
+    --safe:#34D399;
+    --info:#60A5FA;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(circle at 15% 0%, rgba(34,211,238,0.16), transparent 45%),
+      radial-gradient(circle at 85% 100%, var(--glow-2), transparent 45%),
+      radial-gradient(circle at 50% 100%, rgba(45,212,191,0.08), transparent 55%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Inter', sans-serif;
+    min-height:100vh;
+    position:relative;
+  }
+
+  /* Animated background layer: circuit grid + drifting bug glyphs */
+  .bg-fx{position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none;}
+  .bg-grid{
+    position:absolute; inset:-10%; width:120%; height:120%;
+    background-image:
+      linear-gradient(rgba(45,212,191,0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(45,212,191,0.055) 1px, transparent 1px);
+    background-size:44px 44px;
+    animation:gridDrift 26s linear infinite;
+    mask-image:radial-gradient(circle at 50% 30%, black, transparent 75%);
+  }
+  @keyframes gridDrift{ from{transform:translate(0,0);} to{transform:translate(44px,44px);} }
+  .bug-glyph{position:absolute; bottom:-10%; opacity:0; animation:bugRise linear infinite;}
+  @keyframes bugRise{
+    0%{ transform:translateY(0) translateX(0) rotate(-4deg) scale(0.9); opacity:0; }
+    8%{ opacity:0.55; }
+    50%{ transform:translateY(-55vh) translateX(18px) rotate(6deg) scale(1); }
+    92%{ opacity:0.35; }
+    100%{ transform:translateY(-112vh) translateX(-10px) rotate(-6deg) scale(0.85); opacity:0; }
+  }
+  .radar-sweep{
+    position:absolute; top:-25%; right:-15%; width:640px; height:640px; border-radius:50%;
+    background:conic-gradient(from 0deg, rgba(34,211,238,0.16), transparent 28%);
+    animation:radarSpin 9s linear infinite;
+    filter:blur(2px);
+  }
+  @keyframes radarSpin{ to{ transform:rotate(360deg); } }
+
+  .wrap{max-width:1180px; margin:0 auto; padding:28px 20px 60px; position:relative; z-index:1;}
+
+  .header{display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:26px; flex-wrap:wrap;}
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-mark{
+    width:38px; height:38px; border-radius:10px;
+    background:linear-gradient(135deg, var(--accent), #134E4A);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 22px rgba(34,211,238,0.5);
+    flex-shrink:0;
+  }
+  .brand h1{font-family:'Space Grotesk', sans-serif; font-size:20px; margin:0; font-weight:700; letter-spacing:0.2px;}
+  .brand p{margin:2px 0 0; font-size:12.5px; color:var(--muted);}
+  .status-pill{
+    font-size:12px; color:var(--accent-2); background:rgba(34,211,238,0.12);
+    border:1px solid var(--panel-border); padding:6px 12px; border-radius:100px;
+    font-family:'JetBrains Mono', monospace;
+  }
+
+  .grid{display:grid; grid-template-columns: 320px 1fr; gap:20px; align-items:start;}
+  @media (max-width:880px){ .grid{grid-template-columns:1fr;} }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    border-radius:16px;
+    padding:20px;
+    backdrop-filter:blur(20px);
+  }
+  .panel h2{font-family:'Space Grotesk',sans-serif; font-size:14px; margin:0 0 14px; color:var(--accent-2); text-transform:uppercase; letter-spacing:0.08em; display:flex; align-items:center; gap:8px;}
+  .panel h2 svg{flex-shrink:0;}
+  .panel + .panel{margin-top:16px;}
+
+  .dropzone{
+    border:1.5px dashed var(--panel-border);
+    border-radius:12px;
+    padding:28px 16px;
+    text-align:center;
+    cursor:pointer;
+    transition:all .2s ease;
+    position:relative;
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--accent);
+    background:rgba(34,211,238,0.08);
+  }
+  .dropzone svg{opacity:0.7; margin-bottom:8px;}
+  .dropzone .dz-title{font-size:13.5px; font-weight:500;}
+  .dropzone .dz-sub{font-size:11.5px; color:var(--muted); margin-top:4px;}
+  input[type=file]{display:none;}
+
+  .file-list{margin-top:14px; display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;}
+  .file-item{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    background:rgba(255,255,255,0.03); border:1px solid var(--panel-border);
+    border-radius:9px; padding:8px 10px; font-size:12.5px;
+  }
+  .ext-badge{
+    flex-shrink:0; font-family:'JetBrains Mono', monospace; font-size:9px; font-weight:700;
+    padding:3px 5px; border-radius:5px; letter-spacing:0.02em; text-transform:uppercase;
+  }
+  .file-item .fname{font-family:'JetBrains Mono', monospace; font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;}
+  .file-item .fmeta{color:var(--muted); font-size:10.5px; flex-shrink:0;}
+  .file-item button{background:none; border:none; color:var(--muted); cursor:pointer; font-size:15px; padding:0 4px;}
+  .file-item button:hover{color:var(--critical);}
+  .file-item.scanning{border-color:var(--accent);}
+  .file-item.done{border-color:rgba(52,211,153,0.4);}
+  .file-item.error{border-color:rgba(244,63,94,0.4);}
+
+  .rule-list{display:flex; flex-direction:column; gap:8px;}
+  .rule-item{display:flex; align-items:center; gap:9px; font-size:12.5px; padding:7px 9px; border-radius:8px; background:rgba(255,255,255,0.02); border:1px solid var(--panel-border); cursor:pointer;}
+  .rule-item input{accent-color:var(--accent); width:15px; height:15px; cursor:pointer;}
+  .rule-item.off{opacity:0.45;}
+
+  .scan-btn{
+    width:100%; margin-top:16px; padding:12px; border:none; border-radius:10px;
+    background:linear-gradient(135deg, var(--accent), #0E7490);
+    color:white; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px;
+    cursor:pointer; transition:transform .15s ease, box-shadow .15s ease;
+    box-shadow:0 4px 20px rgba(34,211,238,0.35);
+  }
+  .scan-btn:hover:not(:disabled){transform:translateY(-1px); box-shadow:0 6px 26px rgba(34,211,238,0.5);}
+  .scan-btn:disabled{opacity:0.45; cursor:not-allowed;}
+
+  .hint{font-size:11px; color:var(--muted); margin-top:10px; line-height:1.5;}
+
+  .scan-visual{
+    position:relative; height:56px; border-radius:10px; overflow:hidden;
+    background:rgba(255,255,255,0.03); border:1px solid var(--panel-border);
+    margin-top:14px; display:flex; align-items:center; padding:0 12px; gap:2px;
+  }
+  .scan-visual .code-row{height:3px; border-radius:2px; background:rgba(45,212,191,0.18); flex:1;}
+  .scan-visual::after{
+    content:''; position:absolute; top:0; bottom:0; width:40px;
+    background:linear-gradient(90deg, transparent, rgba(34,211,238,0.55), transparent);
+    animation:sweep 1.8s linear infinite; display:none;
+  }
+  .scan-visual.active::after{display:block;}
+  @keyframes sweep{ from{left:-40px;} to{left:100%;} }
+
+  .health-banner{
+    display:flex; align-items:center; gap:20px; padding:18px 22px; margin-bottom:16px;
+    border-radius:16px; border:1px solid var(--panel-border); background:var(--panel);
+  }
+  .health-ring{position:relative; width:72px; height:72px; flex-shrink:0;}
+  .health-ring svg{transform:rotate(-90deg);}
+  .health-ring .score-num{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px;}
+  .health-info .t{font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:600;}
+  .health-info .s{font-size:12.5px; color:var(--muted); margin-top:2px;}
+  .health-actions{margin-left:auto; display:flex; gap:8px; flex-wrap:wrap;}
+  .ghost-btn{
+    background:rgba(34,211,238,0.1); border:1px solid var(--panel-border); color:var(--accent-2);
+    border-radius:9px; padding:8px 13px; font-size:12px; cursor:pointer; font-weight:500;
+    display:flex; align-items:center; gap:6px; transition:border-color .15s ease;
+  }
+  .ghost-btn:hover{border-color:var(--panel-border-hover);}
+
+  .summary-grid{display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-bottom:16px;}
+  @media (max-width:640px){ .summary-grid{grid-template-columns:repeat(2,1fr);} }
+  .cat-card{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:14px;
+    padding:14px 16px; cursor:pointer; transition:border-color .15s ease, transform .15s ease;
+  }
+  .cat-card:hover{border-color:var(--panel-border-hover); transform:translateY(-2px);}
+  .cat-card.active{border-color:var(--accent);}
+  .cat-card .cat-icon{font-size:18px; margin-bottom:8px; display:block;}
+  .cat-card .cat-count{font-family:'Space Grotesk',sans-serif; font-size:26px; font-weight:700; line-height:1;}
+  .cat-card .cat-name{font-size:11.5px; color:var(--muted); margin-top:4px;}
+
+  .file-breakdown{display:flex; flex-direction:column; gap:8px; margin-bottom:16px;}
+  .fb-row{
+    display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:11px;
+    border:1px solid var(--panel-border); background:var(--panel); cursor:pointer;
+    transition:border-color .15s ease;
+  }
+  .fb-row:hover, .fb-row.active{border-color:var(--panel-border-hover);}
+  .fb-row.active{border-color:var(--accent);}
+  .fb-name{font-family:'JetBrains Mono', monospace; font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .fb-dots{display:flex; gap:5px; flex-shrink:0;}
+  .fb-badge{font-size:10.5px; color:var(--muted); font-family:'JetBrains Mono',monospace; flex-shrink:0;}
+
+  .tabs{display:flex; gap:6px; margin-bottom:14px;}
+  .tab-btn{
+    background:transparent; border:1px solid var(--panel-border); color:var(--muted);
+    border-radius:100px; padding:6px 14px; font-size:12.5px; cursor:pointer; font-weight:500;
+  }
+  .tab-btn.active{background:rgba(34,211,238,0.15); color:var(--accent-2); border-color:var(--accent);}
+
+  .findings-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px;}
+  .findings-header h2{margin:0;}
+  .filter-note{font-size:12px; color:var(--muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .filter-note button{background:rgba(34,211,238,0.15); border:1px solid var(--panel-border); color:var(--accent-2); border-radius:100px; padding:3px 10px; font-size:11.5px; cursor:pointer;}
+  .export-btns{display:flex; gap:8px;}
+
+  .finding{
+    border:1px solid var(--panel-border); border-radius:12px; margin-bottom:10px; overflow:hidden;
+    background:rgba(255,255,255,0.02);
+  }
+  .finding.is-resolved{opacity:0.6;}
+  .finding-head{
+    display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer;
+  }
+  .sev-dot{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
+  .sev-critical{background:var(--critical); box-shadow:0 0 8px rgba(244,63,94,0.6);}
+  .sev-warning{background:var(--warning); box-shadow:0 0 8px rgba(245,158,11,0.5);}
+  .sev-info{background:var(--info); box-shadow:0 0 8px rgba(96,165,250,0.5);}
+  .finding-title{font-size:13.5px; font-weight:500; flex:1;}
+  .finding-meta{font-size:11px; color:var(--muted); font-family:'JetBrains Mono', monospace; flex-shrink:0;}
+  .finding-badge{
+    font-size:10px; text-transform:uppercase; letter-spacing:0.05em; padding:2px 8px;
+    border-radius:100px; background:rgba(34,211,238,0.15); color:var(--accent-2); flex-shrink:0;
+  }
+  .status-tag{font-size:9.5px; text-transform:uppercase; padding:2px 7px; border-radius:100px; flex-shrink:0;}
+  .status-tag.resolved{background:rgba(52,211,153,0.15); color:var(--safe);}
+  .status-tag.ignored{background:rgba(148,144,176,0.18); color:var(--muted);}
+  .finding-body{padding:0 14px 16px 32px; display:none; font-size:13px; line-height:1.6; color:var(--text);}
+  .finding.expanded .finding-body{display:block;}
+  .finding-body .snippet{
+    background:rgba(0,0,0,0.35); border:1px solid var(--panel-border); border-radius:8px;
+    padding:10px 12px; font-family:'JetBrains Mono', monospace; font-size:12px; color:#D8D3F5;
+    overflow-x:auto; white-space:pre; margin:8px 0;
+  }
+  .finding-body .fix{color:var(--safe); font-size:12.5px; margin-top:6px;}
+  .finding-body .fix b{color:#6ee7b7;}
+  .finding-actions{display:flex; gap:8px; margin-top:12px;}
+  .finding-actions button{
+    font-size:11.5px; padding:5px 11px; border-radius:8px; cursor:pointer; font-weight:500;
+    border:1px solid var(--panel-border); background:rgba(255,255,255,0.03); color:var(--text);
+  }
+  .finding-actions button:hover{border-color:var(--panel-border-hover);}
+  .finding-actions button.resolve:hover{color:var(--safe); border-color:rgba(52,211,153,0.4);}
+  .finding-actions button.ignore:hover{color:var(--muted);}
+  .finding-actions button.view-file:hover{color:var(--accent-2); border-color:var(--accent);}
+  .chev{color:var(--muted); transition:transform .15s ease; flex-shrink:0;}
+  .finding.expanded .chev{transform:rotate(90deg);}
+
+  .empty-state, .idle-state{
+    text-align:center; padding:60px 20px; color:var(--muted);
+  }
+  .idle-state svg{opacity:0.5; margin-bottom:14px;}
+  .idle-state .t{font-family:'Space Grotesk',sans-serif; font-size:16px; color:var(--text); margin-bottom:6px;}
+  .idle-state .s{font-size:13px; max-width:340px; margin:0 auto;}
+
+  .clean-banner{
+    text-align:center; padding:30px 20px; color:var(--safe);
+    background:rgba(52,211,153,0.06); border:1px solid rgba(52,211,153,0.25); border-radius:14px;
+  }
+  .clean-banner .t{font-family:'Space Grotesk',sans-serif; font-size:15px; margin-bottom:4px;}
+  .clean-banner .s{font-size:12.5px; color:var(--muted);}
+
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(5,4,10,0.75); backdrop-filter:blur(4px);
+    display:none; align-items:center; justify-content:center; z-index:100; padding:24px;
+  }
+  .modal-overlay.open{display:flex;}
+  .modal{
+    background:#12111f; border:1px solid var(--panel-border); border-radius:16px;
+    width:100%; max-width:760px; max-height:82vh; display:flex; flex-direction:column; overflow:hidden;
+  }
+  .modal-head{display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--panel-border);}
+  .modal-head .mname{font-family:'JetBrains Mono', monospace; font-size:13px;}
+  .modal-head button{background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer;}
+  .modal-body{overflow:auto; padding:0;}
+  .modal-body pre{margin:0; padding:16px 18px; font-family:'JetBrains Mono', monospace; font-size:12px; line-height:1.7; color:#D8D3F5; white-space:pre-wrap;}
+  .modal-body .line-hl{background:rgba(244,63,94,0.16); border-left:2px solid var(--critical); display:inline-block; width:100%;}
+
+  ::-webkit-scrollbar{width:8px; height:8px;}
+  ::-webkit-scrollbar-thumb{background:rgba(45,212,191,0.3); border-radius:10px;}
+</style>
+</head>
+<body>
+<div class="bg-fx" aria-hidden="true" id="bgFx">
+  <div class="bg-grid"></div>
+  <div class="radar-sweep"></div>
+</div>
+<div class="wrap">
+
+  <div class="header">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 3L7 6.5M15 3l2 3.5M12 8v13M6 12H2m20 0h-4M6 16H3m18 0h-3M8 8h8a3 3 0 013 3v5a5 5 0 01-5 5h-4a5 5 0 01-5-5v-5a3 3 0 013-3z" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <h1>Bug Detection Agent</h1>
+        <p>Upload a project. Claude scans every file for real risk.</p>
+      </div>
+    </div>
+    <div class="status-pill" id="statusPill">idle · 0 files</div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="#2DD4BF" stroke-width="1.6" stroke-linejoin="round"/></svg>Project Files</h2>
+        <div class="dropzone" id="dropzone">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 16V4m0 0L7 9m5-5l5 5M5 20h14" stroke="#2DD4BF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div class="dz-title">Drop files or click to browse</div>
+          <div class="dz-sub">.js .ts .py .java .php .rb .go .sql .html — multiple files ok</div>
+          <input type="file" id="fileInput" multiple>
+        </div>
+
+        <div class="scan-visual" id="scanVisual">
+          <div class="code-row" style="flex:0.4"></div>
+          <div class="code-row" style="flex:0.8"></div>
+          <div class="code-row" style="flex:0.55"></div>
+          <div class="code-row" style="flex:0.7"></div>
+          <div class="code-row" style="flex:0.3"></div>
+        </div>
+
+        <div class="file-list" id="fileList"></div>
+        <button class="scan-btn" id="scanBtn" disabled>Scan Project</button>
+        <div class="hint">Runs entirely in this chat via the Claude API — nothing leaves this conversation.</div>
+      </div>
+
+      <div class="panel">
+        <h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 6h10M18 6h2M4 12h4M10 12h10M4 18h13M20 18h0" stroke="#2DD4BF" stroke-width="1.6" stroke-linecap="round"/><circle cx="15" cy="6" r="2" fill="#050B12" stroke="#22D3EE" stroke-width="1.5"/><circle cx="8" cy="12" r="2" fill="#050B12" stroke="#22D3EE" stroke-width="1.5"/><circle cx="17" cy="18" r="2" fill="#050B12" stroke="#22D3EE" stroke-width="1.5"/></svg>Rule Categories</h2>
+        <div class="rule-list" id="ruleList"></div>
+      </div>
+    </div>
+
+    <div>
+      <div id="healthArea"></div>
+      <div id="summaryArea"></div>
+      <div id="breakdownArea"></div>
+      <div class="panel" id="resultsPanel">
+        <div class="findings-header">
+          <h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" stroke="#2DD4BF" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 12l2 2 3.5-4" stroke="#22D3EE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Findings</h2>
+          <div class="export-btns" id="exportBtns" style="display:none;">
+            <button class="ghost-btn" onclick="exportCSV()">⬇ CSV</button>
+            <button class="ghost-btn" onclick="exportPDF()">⬇ PDF</button>
+          </div>
+        </div>
+        <div class="tabs" id="statusTabs" style="display:none;">
+          <button class="tab-btn active" data-tab="active" onclick="setStatusTab('active')">Active</button>
+          <button class="tab-btn" data-tab="resolved" onclick="setStatusTab('resolved')">Resolved / Ignored</button>
+        </div>
+        <div class="filter-note" id="filterNote" style="display:none; margin-bottom:10px;"></div>
+        <div id="resultsArea">
+          <div class="idle-state">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" style="margin:0 auto;"><circle cx="11" cy="11" r="7" stroke="#9490B0" stroke-width="1.5"/><path d="M20 20l-3.5-3.5" stroke="#9490B0" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <div class="t">No scan yet</div>
+            <div class="s">Add project files on the left, choose your rule categories, and hit "Scan Project".</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="mname" id="modalFileName"></span>
+      <button onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body"><pre id="modalCode"></pre></div>
+  </div>
+</div>
+
+<script>
+const CATEGORIES = [
+  { key:'null_pointer', label:'Null Pointer Risks', icon:'⚠️' },
+  { key:'infinite_loop', label:'Infinite Loops', icon:'🔁' },
+  { key:'sql_injection', label:'SQL Injection', icon:'🛢️' },
+  { key:'xss', label:'XSS', icon:'🕸️' },
+  { key:'memory_leak', label:'Memory Leaks', icon:'💧' },
+  { key:'duplicate_code', label:'Duplicate Code', icon:'📄' },
+];
+
+let files = [];
+let findings = [];
+let activeCatFilter = null;
+let activeFileFilter = null;
+let statusTab = 'active';
+let ruleEnabled = {};
+CATEGORIES.forEach(c => ruleEnabled[c.key] = true);
+let findingIdSeq = 0;
+
+const fileInput = document.getElementById('fileInput');
+const dropzone = document.getElementById('dropzone');
+const fileListEl = document.getElementById('fileList');
+const scanBtn = document.getElementById('scanBtn');
+const statusPill = document.getElementById('statusPill');
+const scanVisual = document.getElementById('scanVisual');
+const healthArea = document.getElementById('healthArea');
+const summaryArea = document.getElementById('summaryArea');
+const breakdownArea = document.getElementById('breakdownArea');
+const resultsArea = document.getElementById('resultsArea');
+const filterNote = document.getElementById('filterNote');
+const exportBtns = document.getElementById('exportBtns');
+const statusTabsEl = document.getElementById('statusTabs');
+const ruleListEl = document.getElementById('ruleList');
+
+function renderRuleList(){
+  ruleListEl.innerHTML = CATEGORIES.map(c => `
+    <label class="rule-item ${ruleEnabled[c.key] ? '' : 'off'}">
+      <input type="checkbox" ${ruleEnabled[c.key] ? 'checked' : ''} onchange="toggleRule('${c.key}')">
+      ${c.icon} ${c.label}
+    </label>
+  `).join('');
+}
+function toggleRule(key){
+  ruleEnabled[key] = !ruleEnabled[key];
+  renderRuleList();
+}
+renderRuleList();
+
+dropzone.addEventListener('click', () => fileInput.click());
+['dragover','dragenter'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+function handleFiles(fileListRaw){
+  const arr = Array.from(fileListRaw);
+  let pending = arr.length;
+  if(!pending) return;
+  arr.forEach(f => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      files.push({ name: f.name, content: reader.result, status:'queued' });
+      pending--;
+      if(pending === 0) renderFileList();
+    };
+    reader.readAsText(f);
+  });
+}
+
+function renderFileList(){
+  fileListEl.innerHTML = files.map((f,i) => `
+    <div class="file-item ${f.status}" data-idx="${i}">
+      ${extBadge(f.name)}
+      <span class="fname" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+      <span class="fmeta">${sizeLabel(f.content.length)}</span>
+      <button onclick="removeFile(${i})" title="Remove">✕</button>
+    </div>
+  `).join('');
+  statusPill.textContent = `idle · ${files.length} file${files.length===1?'':'s'}`;
+  scanBtn.disabled = files.length === 0;
+}
+
+const EXT_COLORS = {
+  js:  { bg:'rgba(250,204,21,0.16)',  fg:'#FACC15' },
+  jsx: { bg:'rgba(250,204,21,0.16)',  fg:'#FACC15' },
+  ts:  { bg:'rgba(56,189,248,0.16)',  fg:'#38BDF8' },
+  tsx: { bg:'rgba(56,189,248,0.16)',  fg:'#38BDF8' },
+  py:  { bg:'rgba(74,222,128,0.16)',  fg:'#4ADE80' },
+  java:{ bg:'rgba(251,113,133,0.16)', fg:'#FB7185' },
+  php: { bg:'rgba(167,139,250,0.18)', fg:'#A78BFA' },
+  rb:  { bg:'rgba(248,113,113,0.16)', fg:'#F87171' },
+  go:  { bg:'rgba(45,212,191,0.18)',  fg:'#2DD4BF' },
+  sql: { bg:'rgba(251,146,60,0.16)',  fg:'#FB923C' },
+  html:{ bg:'rgba(251,146,60,0.16)',  fg:'#FB923C' },
+  css: { bg:'rgba(96,165,250,0.16)',  fg:'#60A5FA' },
+  c:   { bg:'rgba(226,232,240,0.16)', fg:'#E2E8F0' },
+  cpp: { bg:'rgba(226,232,240,0.16)', fg:'#E2E8F0' },
+};
+function extBadge(name){
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const c = EXT_COLORS[ext] || { bg:'rgba(34,211,238,0.14)', fg:'#22D3EE' };
+  return `<span class="ext-badge" style="background:${c.bg}; color:${c.fg};">${escapeHtml(ext || '?')}</span>`;
+}
+
+function sizeLabel(len){
+  if(len < 1024) return len + ' B';
+  return (len/1024).toFixed(1) + ' KB';
+}
+
+function removeFile(i){
+  files.splice(i,1);
+  renderFileList();
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+scanBtn.addEventListener('click', runScan);
+
+async function runScan(){
+  findings = [];
+  activeCatFilter = null;
+  activeFileFilter = null;
+  statusTab = 'active';
+  scanBtn.disabled = true;
+  scanVisual.classList.add('active');
+  statusPill.textContent = `scanning · 0/${files.length}`;
+  resultsArea.innerHTML = '';
+  summaryArea.innerHTML = '';
+  healthArea.innerHTML = '';
+  breakdownArea.innerHTML = '';
+  exportBtns.style.display = 'none';
+  statusTabsEl.style.display = 'none';
+
+  const activeCats = CATEGORIES.filter(c => ruleEnabled[c.key]);
+  if(activeCats.length === 0){
+    resultsArea.innerHTML = `<div class="idle-state"><div class="t">No rule categories selected</div><div class="s">Enable at least one category on the left to run a scan.</div></div>`;
+    scanBtn.disabled = false;
+    scanVisual.classList.remove('active');
+    return;
+  }
+
+  let completed = 0;
+  const concurrency = 3;
+  let idx = 0;
+
+  async function worker(){
+    while(idx < files.length){
+      const myIdx = idx++;
+      const f = files[myIdx];
+      f.status = 'scanning';
+      renderFileList();
+      try{
+        const results = await analyzeFile(f, activeCats);
+        results.forEach(r => findings.push({
+          ...r, id: 'f' + (findingIdSeq++), file: f.name, status: 'active'
+        }));
+        f.status = 'done';
+      }catch(e){
+        console.error(e);
+        f.status = 'error';
+      }
+      completed++;
+      statusPill.textContent = `scanning · ${completed}/${files.length}`;
+      renderFileList();
+      renderAll();
+    }
+  }
+
+  await Promise.all(Array.from({length: Math.min(concurrency, files.length)}, worker));
+
+  scanVisual.classList.remove('active');
+  statusPill.textContent = `done · ${findings.length} finding${findings.length===1?'':'s'} in ${files.length} file${files.length===1?'':'s'}`;
+  scanBtn.disabled = false;
+  renderAll();
+}
+
+async function analyzeFile(f, activeCats){
+  const response = await fetch(`${API_BASE}/api/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fileName: f.name,
+      content: f.content,
+      categories: activeCats.map(c => c.key)
+    })
+  });
+
+  if(!response.ok){
+    const errBody = await response.json().catch(() => ({}));
+    throw new Error(errBody.error || `Analyze request failed (${response.status})`);
+  }
+  const data = await response.json();
+  return Array.isArray(data.findings) ? data.findings : [];
+}
+
+function renderAll(){
+  renderHealth();
+  renderSummary();
+  renderBreakdown();
+  renderFindings();
+}
+
+function activeFindings(){ return findings.filter(f => f.status === 'active'); }
+function resolvedFindings(){ return findings.filter(f => f.status !== 'active'); }
+
+function renderHealth(){
+  const anyScanned = files.some(f => f.status === 'done' || f.status === 'error');
+  if(!anyScanned){ healthArea.innerHTML=''; return; }
+  const act = activeFindings();
+  const crit = act.filter(f=>f.severity==='critical').length;
+  const warn = act.filter(f=>f.severity==='warning').length;
+  const info = act.filter(f=>f.severity==='info').length;
+  let score = 100 - (crit*12 + warn*5 + info*1.5);
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  let label, color;
+  if(score >= 90){ label='Excellent'; color='var(--safe)'; }
+  else if(score >= 70){ label='Good'; color='var(--info)'; }
+  else if(score >= 40){ label='Needs Work'; color='var(--warning)'; }
+  else{ label='Critical'; color='var(--critical)'; }
+
+  const circumference = 2 * Math.PI * 30;
+  const offset = circumference * (1 - score/100);
+
+  healthArea.innerHTML = `
+    <div class="health-banner">
+      <div class="health-ring">
+        <svg width="72" height="72" viewBox="0 0 72 72">
+          <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="7"/>
+          <circle cx="36" cy="36" r="30" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round"
+            stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
+        </svg>
+        <div class="score-num" style="color:${color}">${score}</div>
+      </div>
+      <div class="health-info">
+        <div class="t">${label}</div>
+        <div class="s">${crit} critical · ${warn} warning · ${info} info across ${files.length} file${files.length===1?'':'s'}</div>
+      </div>
+      <div class="health-actions">
+        <button class="ghost-btn" onclick="exportCSV()">⬇ CSV</button>
+        <button class="ghost-btn" onclick="exportPDF()">⬇ PDF</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSummary(){
+  const anyScanned = files.some(f => f.status === 'done' || f.status === 'error');
+  if(!anyScanned){ summaryArea.innerHTML=''; return; }
+  const act = activeFindings();
+  const counts = {};
+  CATEGORIES.forEach(c => counts[c.key] = 0);
+  act.forEach(f => { if(counts[f.category] !== undefined) counts[f.category]++; });
+
+  summaryArea.innerHTML = `<div class="summary-grid">${CATEGORIES.filter(c=>ruleEnabled[c.key]).map(c => `
+    <div class="cat-card ${activeCatFilter===c.key?'active':''}" onclick="toggleCatFilter('${c.key}')">
+      <span class="cat-icon">${c.icon}</span>
+      <div class="cat-count" style="color:${counts[c.key] > 0 ? sevColorForCount(c.key) : 'var(--text)'}">${counts[c.key]}</div>
+      <div class="cat-name">${c.label}</div>
+    </div>
+  `).join('')}</div>`;
+}
+
+function sevColorForCount(catKey){
+  const items = activeFindings().filter(f => f.category === catKey);
+  if(items.some(f => f.severity === 'critical')) return 'var(--critical)';
+  if(items.some(f => f.severity === 'warning')) return 'var(--warning)';
+  return 'var(--info)';
+}
+
+function renderBreakdown(){
+  const anyScanned = files.some(f => f.status === 'done' || f.status === 'error');
+  if(!anyScanned || files.length < 2){ breakdownArea.innerHTML=''; return; }
+  const act = activeFindings();
+  breakdownArea.innerHTML = `
+    <div class="panel">
+      <h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 7l8-4 8 4-8 4-8-4z" stroke="#2DD4BF" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 12l8 4 8-4M4 17l8 4 8-4" stroke="#2DD4BF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Per-File Breakdown</h2>
+      <div class="file-breakdown">
+        ${files.map(f => {
+          const items = act.filter(x => x.file === f.name);
+          const crit = items.filter(x=>x.severity==='critical').length;
+          const warn = items.filter(x=>x.severity==='warning').length;
+          const info = items.filter(x=>x.severity==='info').length;
+          return `<div class="fb-row ${activeFileFilter===f.name?'active':''}" onclick="toggleFileFilter('${escapeAttr(f.name)}')">
+            <span class="fb-name">${escapeHtml(f.name)}</span>
+            <span class="fb-dots">
+              ${crit ? `<span class="sev-dot sev-critical"></span>` : ''}
+              ${warn ? `<span class="sev-dot sev-warning"></span>` : ''}
+              ${info ? `<span class="sev-dot sev-info"></span>` : ''}
+            </span>
+            <span class="fb-badge">${items.length} issue${items.length===1?'':'s'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function escapeAttr(s){ return s.replace(/'/g, "\\'"); }
+
+function toggleCatFilter(key){
+  activeCatFilter = activeCatFilter === key ? null : key;
+  renderAll();
+}
+function toggleFileFilter(name){
+  activeFileFilter = activeFileFilter === name ? null : name;
+  renderAll();
+}
+function setStatusTab(tab){
+  statusTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  renderFindings();
+}
+
+function renderFindings(){
+  const anyScanned = files.some(f => f.status === 'done' || f.status === 'error');
+  if(!anyScanned){ return; }
+
+  exportBtns.style.display = findings.length ? 'flex' : 'none';
+  statusTabsEl.style.display = findings.length ? 'flex' : 'none';
+
+  const notes = [];
+  if(activeCatFilter){
+    const cat = CATEGORIES.find(c => c.key === activeCatFilter);
+    notes.push(`Category: ${cat.label} <button onclick="toggleCatFilter('${activeCatFilter}')">Clear</button>`);
+  }
+  if(activeFileFilter){
+    notes.push(`File: ${escapeHtml(activeFileFilter)} <button onclick="toggleFileFilter('${escapeAttr(activeFileFilter)}')">Clear</button>`);
+  }
+  filterNote.style.display = notes.length ? 'flex' : 'none';
+  filterNote.innerHTML = notes.join(' &nbsp; ');
+
+  let list = statusTab === 'active' ? activeFindings() : resolvedFindings();
+  if(activeCatFilter) list = list.filter(f => f.category === activeCatFilter);
+  if(activeFileFilter) list = list.filter(f => f.file === activeFileFilter);
+
+  if(list.length === 0){
+    if(statusTab === 'resolved'){
+      resultsArea.innerHTML = `<div class="idle-state"><div class="t">Nothing here yet</div><div class="s">Findings you resolve or ignore will show up in this tab.</div></div>`;
+    }else{
+      resultsArea.innerHTML = `<div class="clean-banner"><div class="t">No issues found${activeCatFilter || activeFileFilter ? ' for this filter' : ''} ✓</div><div class="s">${files.length} file${files.length===1?'':'s'} scanned.</div></div>`;
+    }
+    return;
+  }
+
+  const sevOrder = { critical:0, warning:1, info:2 };
+  const sorted = [...list].sort((a,b) => (sevOrder[a.severity]??2) - (sevOrder[b.severity]??2));
+
+  resultsArea.innerHTML = sorted.map((f) => {
+    const cat = CATEGORIES.find(c => c.key === f.category) || { icon:'•', label:f.category };
+    return `
+    <div class="finding ${f.status !== 'active' ? 'is-resolved' : ''}" id="find-${f.id}">
+      <div class="finding-head" onclick="toggleFinding('${f.id}')">
+        <span class="sev-dot sev-${f.severity || 'info'}"></span>
+        <span class="finding-title">${cat.icon} ${escapeHtml(f.title || cat.label)}</span>
+        <span class="finding-badge">${cat.label}</span>
+        ${f.status !== 'active' ? `<span class="status-tag ${f.status}">${f.status}</span>` : ''}
+        <span class="finding-meta">${escapeHtml(f.file)}${f.line ? ':' + f.line : ''}</span>
+        <span class="chev">›</span>
+      </div>
+      <div class="finding-body">
+        <div>${escapeHtml(f.detail || '')}</div>
+        ${f.snippet ? `<div class="snippet">${escapeHtml(f.snippet)}</div>` : ''}
+        ${f.fix ? `<div class="fix"><b>Fix:</b> ${escapeHtml(f.fix)}</div>` : ''}
+        <div class="finding-actions">
+          <button class="view-file" onclick="event.stopPropagation(); viewFile('${escapeAttr(f.file)}', ${f.line ?? 'null'})">📄 View full file</button>
+          ${f.status === 'active' ? `
+            <button class="resolve" onclick="event.stopPropagation(); setFindingStatus('${f.id}','resolved')">✓ Resolve</button>
+            <button class="ignore" onclick="event.stopPropagation(); setFindingStatus('${f.id}','ignored')">✕ Ignore</button>
+          ` : `
+            <button onclick="event.stopPropagation(); setFindingStatus('${f.id}','active')">↺ Restore</button>
+          `}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleFinding(id){
+  document.getElementById(`find-${id}`).classList.toggle('expanded');
+}
+
+function setFindingStatus(id, status){
+  const f = findings.find(x => x.id === id);
+  if(f) f.status = status;
+  renderAll();
+}
+
+function viewFile(name, line){
+  const f = files.find(x => x.name === name);
+  if(!f) return;
+  document.getElementById('modalFileName').textContent = name;
+  const lines = f.content.split('\n');
+  const html = lines.map((ln, i) => {
+    const n = i + 1;
+    const isHl = line && n === line;
+    return `<span${isHl ? ' class="line-hl"' : ''}>${String(n).padStart(4,' ')}  ${escapeHtml(ln)}</span>`;
+  }).join('\n');
+  document.getElementById('modalCode').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+  if(line){
+    setTimeout(() => {
+      const hl = document.querySelector('.line-hl');
+      if(hl) hl.scrollIntoView({ block:'center' });
+    }, 50);
+  }
+}
+function closeModal(){ document.getElementById('modalOverlay').classList.remove('open'); }
+document.getElementById('modalOverlay').addEventListener('click', e => { if(e.target.id === 'modalOverlay') closeModal(); });
+
+function exportCSV(){
+  const header = ['File','Line','Category','Severity','Status','Title','Detail','Fix'];
+  const rows = findings.map(f => [
+    f.file, f.line ?? '', f.category, f.severity, f.status, f.title, f.detail, f.fix
+  ]);
+  const csv = [header, ...rows].map(row =>
+    row.map(cell => `"${String(cell ?? '').replace(/"/g,'""')}"`).join(',')
+  ).join('\n');
+  const blob = new Blob([csv], { type:'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'bug-scan-report.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportPDF(){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const marginX = 40;
+  let y = 50;
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('Bug Detection Agent — Scan Report', marginX, y); y += 22;
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text(`${files.length} file(s) scanned · ${findings.length} finding(s) · ${new Date().toLocaleString()}`, marginX, y);
+  y += 24;
+
+  const sevOrder = { critical:0, warning:1, info:2 };
+  const sorted = [...findings].sort((a,b) => (sevOrder[a.severity]??2)-(sevOrder[b.severity]??2));
+
+  sorted.forEach((f) => {
+    const cat = CATEGORIES.find(c => c.key === f.category);
+    const lines = [
+      `[${f.severity.toUpperCase()}] ${f.title || ''}  —  ${f.file}${f.line ? ':' + f.line : ''}  (${cat ? cat.label : f.category})${f.status !== 'active' ? '  [' + f.status.toUpperCase() + ']' : ''}`,
+      ...doc.splitTextToSize(f.detail || '', 500),
+      ...(f.fix ? ['Fix: ' + f.fix] : [])
+    ];
+    const blockHeight = lines.length * 13 + 14;
+    if(y + blockHeight > pageHeight - 40){ doc.addPage(); y = 50; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(10.5);
+    doc.text(lines[0], marginX, y); y += 15;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
+    lines.slice(1).forEach(l => { doc.text(l, marginX, y); y += 13; });
+    y += 8;
+  });
+
+  doc.save('bug-scan-report.pdf');
+}
+
+function initBugGlyphs(){
+  const host = document.getElementById('bgFx');
+  const bugSvg = (color) => `
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <ellipse cx="12" cy="13" rx="5" ry="7" fill="${color}" opacity="0.9"/>
+      <circle cx="12" cy="5.5" r="2.6" fill="${color}"/>
+      <line x1="12" y1="7" x2="12" y2="19" stroke="${color}" stroke-width="0.8" opacity="0.6"/>
+      <path d="M7 10 L2.5 7.5M7 14 L2 15.5M7 18 L3 20.5" stroke="${color}" stroke-width="1.1" stroke-linecap="round"/>
+      <path d="M17 10 L21.5 7.5M17 14 L22 15.5M17 18 L21 20.5" stroke="${color}" stroke-width="1.1" stroke-linecap="round"/>
+      <path d="M9.5 3.5 L8 1M14.5 3.5 L16 1" stroke="${color}" stroke-width="1" stroke-linecap="round"/>
+    </svg>`;
+  const colors = ['#2DD4BF', '#22D3EE', '#E879F9'];
+  const count = 9;
+  for(let i = 0; i < count; i++){
+    const el = document.createElement('div');
+    el.className = 'bug-glyph';
+    el.innerHTML = bugSvg(colors[i % colors.length]);
+    el.style.left = (Math.random() * 92 + 2) + '%';
+    el.style.animationDuration = (14 + Math.random() * 14) + 's';
+    el.style.animationDelay = (Math.random() * 18) + 's';
+    el.style.transform = `scale(${0.6 + Math.random() * 0.7})`;
+    host.appendChild(el);
+  }
+}
+initBugGlyphs();
+
+renderFileList();
+</script>
+</body>
+</html>
